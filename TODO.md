@@ -1,3 +1,4 @@
 - [ ] Filter out strings like application/json, text/html and so on
 - [x] Add structure for output data
 - [ ] Add read from URL
+- [ ] Add secrets extraction
