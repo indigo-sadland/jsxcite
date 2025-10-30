@@ -24,7 +24,7 @@ func IsLocalPath(path string) (bool, error) {
 	return true, nil
 }
 
-func IsURL(path string) bool {
+func IsWebPath(path string) bool {
 
 	_, err := url.ParseRequestURI(path)
 	if err != nil {

@@ -3,9 +3,12 @@ package path_matcher
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 
 	"github.com/indigo-sadland/jsxcite/internal/models"
 	checkpath "github.com/indigo-sadland/jsxcite/internal/utils/check-path"
+	"github.com/indigo-sadland/jsxcite/internal/utils/filter"
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/javascript"
 
@@ -24,9 +27,25 @@ func ExtractPaths(targetJs string, showSkipped bool) ([]models.Path, error) {
 	// Check source of the target JS files
 	isLocal, _ := checkpath.IsLocalPath(targetJs)
 	if !isLocal {
-		isRemote := checkpath.IsURL(targetJs)
+		isRemote := checkpath.IsWebPath(targetJs)
 		if !isRemote {
 			return []models.Path{}, fmt.Errorf("%s is not a valid path", targetJs)
+		} else {
+			response, err := http.Get(targetJs)
+			if err != nil {
+				return []models.Path{}, fmt.Errorf("failed to get remote file %s: %w", targetJs, err)
+			}
+
+			// read response body
+			sourceCode, err = io.ReadAll(response.Body)
+			if err != nil {
+				return []models.Path{}, fmt.Errorf("failed to get remote file %s: %w", targetJs, err)
+			}
+		}
+	} else {
+		sourceCode, err = os.ReadFile(targetJs)
+		if err != nil {
+			return []models.Path{}, fmt.Errorf("failed to read file %s: %w", targetJs, err)
 		}
 	}
 
@@ -35,11 +54,6 @@ func ExtractPaths(targetJs string, showSkipped bool) ([]models.Path, error) {
 		if err != nil {
 			return []models.Path{}, err
 		}
-	}
-
-	sourceCode, err = os.ReadFile(targetJs)
-	if err != nil {
-		return []models.Path{}, fmt.Errorf("failed to read file %s: %w", targetJs, err)
 	}
 
 	// Create JavaScript parser
@@ -65,9 +79,6 @@ func ExtractPaths(targetJs string, showSkipped bool) ([]models.Path, error) {
 		log.Fatal(err)
 	}
 	defer query.Close()
-
-	// Compile regex patterns for URL/URI detection
-	urlPatterns := compileURLPatterns()
 
 	// Execute query
 	qc := sitter.NewQueryCursor()
@@ -104,7 +115,7 @@ func ExtractPaths(targetJs string, showSkipped bool) ([]models.Path, error) {
 			content := extractStringContent(text)
 
 			// Check if it looks like a URL/URI
-			if !isURL(content, urlPatterns) {
+			if !filter.IsURL(content) {
 				continue
 			}
 
@@ -148,7 +159,6 @@ type NodeContext struct {
 
 func ExtractFromComment(comment string) []string {
 	var urls []string
-	urlPatterns := compileURLPatterns()
 	// Clean comment markers
 	cleaned := comment
 	cleaned = regexp.MustCompile(`^//\s*`).ReplaceAllString(cleaned, "")
@@ -159,7 +169,7 @@ func ExtractFromComment(comment string) []string {
 	words := regexp.MustCompile(`[\s,;(){}[\]<>"'`+"`"+`]+`).Split(cleaned, -1)
 	for _, word := range words {
 		word = strings.TrimRight(word, ".,;:!?")
-		if isURL(word, urlPatterns) {
+		if filter.IsURL(word) {
 			urls = append(urls, word)
 		}
 	}
@@ -213,48 +223,6 @@ func getNodeContext(node *sitter.Node, sourceCode []byte) NodeContext {
 	}
 
 	return ctx
-}
-
-// compileURLPatterns creates regex patterns for different URL/URI types
-func compileURLPatterns() []*regexp.Regexp {
-	patterns := []string{
-		// Full URLs with protocol
-		`^(https?|wss?|ftp|file)://`,
-
-		// Absolute paths (starting with /)
-		`^/[a-zA-Z0-9_\-./]+`,
-
-		// Relative paths with multiple segments containing /
-		`^[a-zA-Z0-9_\-]+(/[a-zA-Z0-9_\-./]+)+`,
-
-		// Relative parent paths
-		`^\.\.?/`,
-
-		`(?:localhost|\b\d{1,3}(?:\.\d{1,3}){3}\b)(?::\d{1,5})?`,
-	}
-
-	var compiled []*regexp.Regexp
-	for _, pattern := range patterns {
-		compiled = append(compiled, regexp.MustCompile(pattern))
-	}
-	return compiled
-}
-
-// isURLLike checks if a string matches URL/URI patterns
-func isURL(s string, patterns []*regexp.Regexp) bool {
-	// Skip very short strings or strings with spaces
-	if len(s) < 3 || regexp.MustCompile(`\s`).MatchString(s) {
-		return false
-	}
-
-	// Check against all patterns
-	for _, pattern := range patterns {
-		if pattern.MatchString(s) {
-			return true
-		}
-	}
-
-	return false
 }
 
 // extractStringContent removes quotes or backticks from string literals

@@ -1,4 +1,5 @@
-- [ ] Filter out strings like application/json, text/html and so on
+- [x] Filter out strings like application/json, text/html and so on
 - [x] Add structure for output data
-- [ ] Add read from URL
+- [x] Add read from URL
 - [ ] Add secrets extraction
+- [ ] Maybe add option to ignore all filters?
