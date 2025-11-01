@@ -2,6 +2,8 @@ package filter
 
 import (
 	"regexp"
+	"strings"
+	"unicode"
 )
 
 // IsMimeType filters out strings that are valid http content types
@@ -20,7 +22,7 @@ func IsMimeType(content string) bool {
 }
 
 // IsURL checks if a string matches URL/URI patterns
-func IsURL(content string) bool {
+func IsURL(content string, deepCleanNeeded bool) bool {
 
 	patterns := compileURLPatterns()
 
@@ -37,11 +39,30 @@ func IsURL(content string) bool {
 	// Check against all patterns
 	for _, pattern := range patterns {
 		if pattern.MatchString(content) {
+			// Filter out "http://www.w3.org"
+			if strings.Contains(content, "www.w3.org") {
+				return false
+			}
+
+			// There might be strings like DD/MM/YYYY which are (possible) not valid paths,
+			// so we want to filter them out as well.
+			if isUpper(content) && deepCleanNeeded {
+				return false
+			}
 			return true
 		}
 	}
 
 	return false
+}
+
+func isUpper(s string) bool {
+	for _, r := range s {
+		if !unicode.IsUpper(r) && unicode.IsLetter(r) {
+			return false
+		}
+	}
+	return true
 }
 
 // compileURLPatterns creates regex patterns for different URL/URI types

@@ -18,7 +18,7 @@ var pathsCmd = &cobra.Command{
 		var paths []string
 
 		target, _ := cmd.Flags().GetString("target")
-		//showSkipped, _ := cmd.Flags().GetBool("show-skipped")
+		deepClean, _ := cmd.Flags().GetBool("deep-clean")
 
 		// Handle '-t' flag first
 		if target == "" {
@@ -48,7 +48,7 @@ var pathsCmd = &cobra.Command{
 
 		var result []models.Path
 		for _, path := range paths {
-			ps, err := pathmatcher.ExtractPaths(path, false)
+			ps, err := pathmatcher.ExtractPaths(path, deepClean)
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
@@ -75,7 +75,7 @@ func init() {
 	pathsCmd.Flags().StringP("target", "t", "", "URL or local path to target JS file\n"+
 		"Examples: jsxcite paths -t https://example.com/libs/main.js\n "+
 		"	jsxcite paths -t ./app/main.js\n")
-	pathsCmd.Flags().BoolP("show-skipped", "s", false, "Show findings that matched paths "+
-		"patterns but most likely are false alarm.")
+	pathsCmd.Flags().BoolP("deep-clean", "c", true, "Filter out matched patterns "+
+		"that most likely are false alarm. Enabled by default.")
 
 }

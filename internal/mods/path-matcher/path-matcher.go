@@ -18,7 +18,7 @@ import (
 	"strings"
 )
 
-func ExtractPaths(targetJs string, showSkipped bool) ([]models.Path, error) {
+func ExtractPaths(targetJs string, deepClean bool) ([]models.Path, error) {
 	var err error
 	var pathStruct models.Path
 	var pathStructs []models.Path
@@ -27,6 +27,7 @@ func ExtractPaths(targetJs string, showSkipped bool) ([]models.Path, error) {
 	// Check source of the target JS files
 	isLocal, _ := checkpath.IsLocalPath(targetJs)
 	if !isLocal {
+
 		isRemote := checkpath.IsWebPath(targetJs)
 		if !isRemote {
 			return []models.Path{}, fmt.Errorf("%s is not a valid path", targetJs)
@@ -43,6 +44,13 @@ func ExtractPaths(targetJs string, showSkipped bool) ([]models.Path, error) {
 			}
 		}
 	} else {
+
+		if strings.HasPrefix(targetJs, "~") {
+			targetJs, err = checkpath.ExpandPath(targetJs)
+			if err != nil {
+				return []models.Path{}, fmt.Errorf("failed to expand path: %w", err)
+			}
+		}
 		sourceCode, err = os.ReadFile(targetJs)
 		if err != nil {
 			return []models.Path{}, fmt.Errorf("failed to read file %s: %w", targetJs, err)
@@ -99,7 +107,7 @@ func ExtractPaths(targetJs string, showSkipped bool) ([]models.Path, error) {
 
 			// Match in comments
 			if node.Type() == "comment" {
-				urls := ExtractFromComment(text)
+				urls := extractFromComment(text, deepClean)
 				for _, url := range urls {
 					pathStruct = models.Path{
 						URL:    url,
@@ -111,19 +119,35 @@ func ExtractPaths(targetJs string, showSkipped bool) ([]models.Path, error) {
 				continue
 			}
 
+			// Handle template strings specially
+			if node.Type() == "template_string" {
+				paths := extractFromTemplate(text, deepClean)
+				for _, path := range paths {
+					ctx := getNodeContext(node, sourceCode)
+					t := fmt.Sprintf("[%s-template]", ctx.contextType)
+					pathStruct = models.Path{
+						URL:    path,
+						Source: targetJs,
+						Type:   t,
+					}
+					pathStructs = append(pathStructs, pathStruct)
+				}
+				continue
+			}
+
 			// Extract the actual string content (remove quotes/backticks)
 			content := extractStringContent(text)
 
 			// Check if it looks like a URL/URI
-			if !filter.IsURL(content) {
+			if !filter.IsURL(content, deepClean) {
 				continue
 			}
 
 			// Check the nodeContext - skip if it's in an import/require
 			nodeContext := getNodeContext(node, sourceCode)
 			if nodeContext.isImport || nodeContext.isRequire {
-				if showSkipped {
-					t := fmt.Sprintf("SKIPPED - %s", nodeContext.contextType)
+				if !deepClean {
+					t := fmt.Sprintf("%s", nodeContext.contextType)
 					pathStruct = models.Path{
 						URL:    content,
 						Source: targetJs,
@@ -157,7 +181,7 @@ type NodeContext struct {
 	contextType string
 }
 
-func ExtractFromComment(comment string) []string {
+func extractFromComment(comment string, deepCleanNeeded bool) []string {
 	var urls []string
 	// Clean comment markers
 	cleaned := comment
@@ -169,7 +193,7 @@ func ExtractFromComment(comment string) []string {
 	words := regexp.MustCompile(`[\s,;(){}[\]<>"'`+"`"+`]+`).Split(cleaned, -1)
 	for _, word := range words {
 		word = strings.TrimRight(word, ".,;:!?")
-		if filter.IsURL(word) {
+		if filter.IsURL(word, deepCleanNeeded) {
 			urls = append(urls, word)
 		}
 	}
@@ -237,4 +261,56 @@ func extractStringContent(s string) string {
 	}
 
 	return s
+}
+
+func extractFromTemplate(template string, deepCleanNeeded bool) []string {
+	var paths []string
+
+	// Remove backticks
+	if len(template) >= 2 && template[0] == '`' && template[len(template)-1] == '`' {
+		template = template[1 : len(template)-1]
+	}
+
+	if !deepCleanNeeded {
+		// Return the entire template content if it contains path-like patterns
+		if strings.Contains(template, "/") || strings.HasPrefix(template, "http") {
+			paths = append(paths, template)
+		}
+	} else {
+		// Filter out templates with complex interpolations (function calls, operators)
+		if hasComplexInterpolation(template) {
+			return paths
+		}
+
+		// Return the entire template content if it contains path-like patterns
+		if strings.Contains(template, "/") || strings.HasPrefix(template, "http") {
+			paths = append(paths, template)
+		}
+
+	}
+
+	return paths
+}
+
+func hasComplexInterpolation(s string) bool {
+	// Check for function calls within interpolations: ${func()}
+	if regexp.MustCompile(`\$\{[^}]*\([^)]*\)`).MatchString(s) {
+		return true
+	}
+
+	// Check for operators within interpolations: ${a+b}, ${!x}
+	if regexp.MustCompile(`\$\{[^}]*[+\-*/%!&|<>=][^}]*\}`).MatchString(s) {
+		return true
+	}
+
+	return false
+}
+
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }
